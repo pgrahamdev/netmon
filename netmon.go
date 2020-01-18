@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -226,14 +227,15 @@ func getSpeedTestInfo(server int) PerfJSON {
 
 // HandlerContext provides a context for the WebSockets.
 type HandlerContext struct {
-	server int
-	perfs  []PerfJSON
-	mtx    sync.Mutex
+	mtx     sync.Mutex
+	perfs   []PerfJSON
+	reqChan chan bool
+	wsMap   map[*websocket.Conn]bool
 }
 
 // NewHandlerContext creaees a new HandlerContext struct
-func NewHandlerContext(server int) *HandlerContext {
-	return &HandlerContext{server: server}
+func NewHandlerContext() *HandlerContext {
+	return &HandlerContext{reqChan: make(chan bool), wsMap: make(map[*websocket.Conn]bool)}
 }
 
 // WsHandler uses the context information to handle WebSocket requests
@@ -244,7 +246,7 @@ func (ctx *HandlerContext) WsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Println("New web socket connection.")
-	connMap[c] = true
+	ctx.wsMap[c] = true
 	defer c.Close()
 	var tmpData []byte
 	// Marshalling an empty slice returns "null",
@@ -262,55 +264,96 @@ func (ctx *HandlerContext) WsHandler(w http.ResponseWriter, r *http.Request) {
 	err = c.WriteJSON(Result{Type: initType, Data: string(tmpData)})
 	if err != nil {
 		log.Println("write:", err)
-		connMap[c] = false
+		ctx.wsMap[c] = false
 		return
 	}
 
-	var perf PerfJSON
 	for {
 		_, message, err := c.ReadMessage()
 		if err != nil {
 			log.Println("read:", err)
-			connMap[c] = false
+			ctx.wsMap[c] = false
 			break
 		}
 		log.Printf("recv: %s", message)
-		err = c.WriteJSON(Result{Type: statusType, Data: "Request made. Waiting for response."})
-		if err != nil {
-			log.Println("write:", err)
-			connMap[c] = false
-			break
+		ctx.reqChan <- true
+	}
+}
+
+// Need to pass perfs by reference so we can add to the slice.
+func speedtestHandler(server int, req chan bool, wsMap map[*websocket.Conn]bool, perfs *[]PerfJSON) {
+
+	var perf PerfJSON
+	for {
+		// Wait for a request
+		<-req
+		// Send out a status message to all WebSockets
+		for conn, v := range wsMap {
+			// We have a dead WebSocket.  Clean it up
+			if v == false {
+				conn.Close()
+				delete(wsMap, conn)
+				// Otherwise, let's try to use it
+			} else {
+				err := conn.WriteJSON(Result{Type: statusType, Data: "Request made. Waiting for response."})
+				if err != nil {
+					log.Println("write:", err)
+					conn.Close()
+					delete(wsMap, conn)
+				}
+			}
 		}
-		perf = getSpeedTestInfo(ctx.server)
-		ctx.mtx.Lock()
-		// TODO: Add mutex to handle multiple WebSocket connections
-		ctx.perfs = append(ctx.perfs, perf)
-		ctx.mtx.Unlock()
-		//err = c.WriteMessage(mt, message)
+		// Request speedTest data
+		perf = getSpeedTestInfo(server)
+		// Add to the perfs array for future reference
+		*perfs = append(*perfs, perf)
+		// Marshal the latest value for sending
 		tmpData, err := json.Marshal(perf)
 		if err != nil {
 			log.Println("Error encoding speedtest data.")
-			break
+			continue
 		}
-		err = c.WriteJSON(Result{Type: resultType, Data: string(tmpData)})
-		if err != nil {
-			log.Println("write:", err)
-			connMap[c] = false
-			break
+		// Send out the result
+		for conn, v := range wsMap {
+			// We have a dead WebSocket.  Clean it up
+			if v == false {
+				conn.Close()
+				delete(wsMap, conn)
+			} else {
+				err = conn.WriteJSON(Result{Type: resultType, Data: string(tmpData)})
+				if err != nil {
+					log.Println("write:", err)
+					conn.Close()
+					delete(wsMap, conn)
+				}
+			}
 		}
+	}
+}
+
+func speedtestTimer(req chan bool, period int) {
+	for {
+		req <- true
+		time.Sleep(time.Minute * time.Duration(period))
 	}
 }
 
 func main() {
 	server := flag.Int("server", -1, "The server ID to use for speedtest-cli")
 	// csvFlag := flag.Bool("csv", false, "Enable CSV mode for speedtest-cli")
-	// period := flag.Int("period", 60, "The period between calls to speedtest-cli")
+	period := flag.Int("period", 60, "The period between calls to speedtest-cli")
 	// iterations := flag.Int("iterations", 24, "The number of times to execute speedtest-cli")
 	addr := flag.String("addr", "localhost:8080", "http service address")
 
 	flag.Parse()
 
-	ctx := NewHandlerContext(*server)
+	ctx := NewHandlerContext()
+
+	// Run go routine that actually requests data
+	go speedtestHandler(*server, ctx.reqChan, ctx.wsMap, &(ctx.perfs))
+
+	// provides a request every *period minutes
+	go speedtestTimer(ctx.reqChan, *period)
 	// var serverID string
 	http.HandleFunc("/ws", ctx.WsHandler)
 	http.Handle("/", http.FileServer(http.Dir("www")))
