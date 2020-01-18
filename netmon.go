@@ -240,6 +240,7 @@ func NewHandlerContext() *HandlerContext {
 
 // WsHandler uses the context information to handle WebSocket requests
 func (ctx *HandlerContext) WsHandler(w http.ResponseWriter, r *http.Request) {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
@@ -343,7 +344,7 @@ func main() {
 	// csvFlag := flag.Bool("csv", false, "Enable CSV mode for speedtest-cli")
 	period := flag.Int("period", 60, "The period between calls to speedtest-cli")
 	// iterations := flag.Int("iterations", 24, "The number of times to execute speedtest-cli")
-	addr := flag.String("addr", "localhost:8080", "http service address")
+	addr := flag.String("addr", ":8080", "http service address")
 
 	flag.Parse()
 
