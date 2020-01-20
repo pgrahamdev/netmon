@@ -19,38 +19,6 @@ var upgrader = websocket.Upgrader{} // use default options
 var connMap = make(map[*websocket.Conn]bool)
 var perfChan = make(chan int, 2)
 
-func ws(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Print("upgrade:", err)
-		return
-	}
-	fmt.Println("New web socket connection.")
-	connMap[c] = true
-	defer c.Close()
-	for {
-		mt, message, err := c.ReadMessage()
-		if err != nil {
-			log.Println("read:", err)
-			connMap[c] = false
-			break
-		}
-		log.Printf("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
-			log.Println("write:", err)
-			connMap[c] = false
-			break
-		}
-	}
-}
-
-func oldmain() {
-	flag.Parse()
-	log.SetFlags(0)
-
-}
-
 const (
 	serverNum = iota
 	companyName
@@ -61,8 +29,6 @@ const (
 	download
 	upload
 )
-
-//"encoding/csv"
 
 type perf struct {
 	serverNum   int
@@ -179,34 +145,7 @@ func getSpeedTestInfo(server int) (PerfJSON, error) {
 		serverID = ""
 	}
 	var cmd *exec.Cmd
-	// for iter := 0; iter < *iterations; iter++ {
-	// 	if iter != 0 {
-	// 		time.Sleep(time.Minute * time.Duration(*period))
-	// 	}
-	// 	if *csvFlag {
-	// 		if serverID != "" {
-	// 			cmd = exec.Command("speedtest-cli", "--csv", "--server", serverID)
-	// 		} else {
-	// 			cmd = exec.Command("speedtest-cli", "--csv")
-	// 		}
-	// 		stdout, err := cmd.StdoutPipe()
-	// 		if err != nil {
-	// 			log.Fatal(err)
-	// 		}
-	// 		if err = cmd.Start(); err != nil {
-	// 			log.Fatal(err)
-	// 		}
-	// 		csvReader := csv.NewReader(stdout)
-	// 		fields, err := csvReader.Read()
-	// 		perfRec, err := parseFields(fields)
-	// 		if err != nil {
-	// 			log.Fatal(err)
-	// 		}
-	// 		if err = cmd.Wait(); err != nil {
-	// 			log.Fatal(err)
-	// 		}
-	// 		perfRec.print()
-	// 	} else {
+
 	var perf PerfJSON
 	if serverID != "" {
 		cmd = exec.Command("speedtest-cli", "--json", "--server", serverID)
