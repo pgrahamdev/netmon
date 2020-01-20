@@ -162,7 +162,16 @@ func parseFields(fields []string) (perf, error) {
 	return perfRec, err
 }
 
-func getSpeedTestInfo(server int) PerfJSON {
+// GetSpeedError is an error type for handling getSpeedTestInfo errors.
+type GetSpeedError struct {
+	ErrorString string
+}
+
+func (gse GetSpeedError) Error() string {
+	return gse.ErrorString
+}
+
+func getSpeedTestInfo(server int) (PerfJSON, error) {
 	var serverID string
 	if server > -1 {
 		serverID = strconv.Itoa(server)
@@ -206,23 +215,22 @@ func getSpeedTestInfo(server int) PerfJSON {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Fatal(err)
+		return perf, err
 	}
 	dec := json.NewDecoder(stdout)
 	if err = cmd.Start(); err != nil {
-		log.Fatal(err)
+		return perf, err
 	}
 	if err = dec.Decode(&perf); err == io.EOF {
-		fmt.Println("Found end of file.")
+		return perf, GetSpeedError{ErrorString: "No output provided from test."}
 	} else if err != nil {
-		fmt.Println("Error decoding JSON.")
-		log.Fatal(err)
+		return perf, err
 	}
 	if err = cmd.Wait(); err != nil {
-		log.Fatal(err)
+		return perf, err
 	}
 	perf.print()
-	return perf
+	return perf, err
 }
 
 // HandlerContext provides a context for the WebSockets.
@@ -281,31 +289,43 @@ func (ctx *HandlerContext) WsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func sendWebSocketData(wsMap map[*websocket.Conn]bool, messageType string, data string) {
+	// Send out a status message to all WebSockets
+	for conn, v := range wsMap {
+		// We have a dead WebSocket.  Clean it up
+		if v == false {
+			conn.Close()
+			delete(wsMap, conn)
+			// Otherwise, let's try to use it
+		} else {
+			err := conn.WriteJSON(Result{Type: messageType, Data: data})
+			if err != nil {
+				log.Println("write:", err)
+				conn.Close()
+				delete(wsMap, conn)
+			}
+		}
+	}
+}
+
 // Need to pass perfs by reference so we can add to the slice.
 func speedtestHandler(server int, req chan bool, wsMap map[*websocket.Conn]bool, perfs *[]PerfJSON) {
 
 	var perf PerfJSON
+	var err error
 	for {
 		// Wait for a request
 		<-req
 		// Send out a status message to all WebSockets
-		for conn, v := range wsMap {
-			// We have a dead WebSocket.  Clean it up
-			if v == false {
-				conn.Close()
-				delete(wsMap, conn)
-				// Otherwise, let's try to use it
-			} else {
-				err := conn.WriteJSON(Result{Type: statusType, Data: "Request made. Waiting for response."})
-				if err != nil {
-					log.Println("write:", err)
-					conn.Close()
-					delete(wsMap, conn)
-				}
-			}
-		}
+		sendWebSocketData(wsMap, statusType, "Request made. Waiting for response.")
 		// Request speedTest data
-		perf = getSpeedTestInfo(server)
+		perf, err = getSpeedTestInfo(server)
+		if err != nil {
+			log.Println("Error trying to get SpeedTest info.\n" + err.Error())
+			// Send out a status message to all WebSockets
+			sendWebSocketData(wsMap, statusType, "Error executing SpeedTest.")
+			continue
+		}
 		// Add to the perfs array for future reference
 		*perfs = append(*perfs, perf)
 		// Marshal the latest value for sending
@@ -315,20 +335,7 @@ func speedtestHandler(server int, req chan bool, wsMap map[*websocket.Conn]bool,
 			continue
 		}
 		// Send out the result
-		for conn, v := range wsMap {
-			// We have a dead WebSocket.  Clean it up
-			if v == false {
-				conn.Close()
-				delete(wsMap, conn)
-			} else {
-				err = conn.WriteJSON(Result{Type: resultType, Data: string(tmpData)})
-				if err != nil {
-					log.Println("write:", err)
-					conn.Close()
-					delete(wsMap, conn)
-				}
-			}
-		}
+		sendWebSocketData(wsMap, resultType, string(tmpData))
 	}
 }
 
