@@ -286,10 +286,9 @@ func speedtestTimer(req chan bool, period int) {
 }
 
 func main() {
-	server := flag.Int("server", -1, "The server ID to use for speedtest-cli")
-	// csvFlag := flag.Bool("csv", false, "Enable CSV mode for speedtest-cli")
-	period := flag.Int("period", 60, "The period between calls to speedtest-cli")
-	// iterations := flag.Int("iterations", 24, "The number of times to execute speedtest-cli")
+	server := flag.Int("server", -1, "The server ID to use for speedtest-cli. "+
+		"If -1 is provided,\nspeedtest-cli will choose the 'best' server.")
+	period := flag.Int("period", 60, "The period (in minutes) between calls to speedtest-cli")
 	addr := flag.String("addr", ":8080", "http service address")
 
 	flag.Parse()
