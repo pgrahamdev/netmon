@@ -14,9 +14,10 @@ At this point, the `netmon` program can be run.
 The usage for the program is as follows:
 
     Usage of ./netmon:
-    -addr string
-            http service address (default ":8080")
-    -period int
-            The period between calls to speedtest-cli (default 60)
-    -server int
-            The server ID to use for speedtest-cli (default -1)
+        -addr string
+                http service address (default ":8080")
+        -period int
+                The period (in minutes) between calls to speedtest-cli (default 60)
+        -server int
+                The server ID to use for speedtest-cli. If -1 is provided,
+                speedtest-cli will choose the 'best' server. (default -1)
