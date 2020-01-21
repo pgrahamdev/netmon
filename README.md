@@ -1,4 +1,4 @@
-= Netmon - Simple Go wrapper for SpeedTest.net Python with Web interface
+# Netmon - Simple Go wrapper for SpeedTest.net Python with Web interface
 
 This is an experiment on how to write a Go program that interacts with a Web interface through WebSockets.  There is an accompanying repository with a React web interface intended to work with the Go program.
 
