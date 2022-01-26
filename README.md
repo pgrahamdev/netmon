@@ -13,11 +13,29 @@ At this point, the `netmon` program can be run.
 
 The usage for the program is as follows:
 
-    Usage of ./netmon:
-        -addr string
-                http service address (default ":8080")
-        -period int
-                The period (in minutes) between calls to speedtest-cli (default 60)
-        -server int
-                The server ID to use for speedtest-cli. If -1 is provided,
-                speedtest-cli will choose the 'best' server. (default -1)
+``` sh
+Usage of ./netmon:
+  -addr string
+        http service address (default ":8080")
+  -period int
+        The period (in minutes) between calls to speedtest-cli (default 60)
+  -server int
+        The server ID to use for speedtest-cli. If -1 is provided,
+        speedtest-cli will choose the 'best' server. (default -1)
+```
+
+## `netmon-client`
+
+In addition to supporting web clients, the repository also includes a simple Go
+command-line client called `netmon-client`.  It can be built by simply running
+`go build .` in the `netmon-client` directory.
+
+The usage for `netmon-client` is as follows:
+
+``` sh
+Usage of ./netmon-client:
+  -ip string
+        IP address or name of netmon server (default "localhost")
+  -port int
+        TCP port number to use to connect to the netmon server (default 8080)
+```
