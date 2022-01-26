@@ -13,134 +13,12 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pgrahamdev/netmon/messages"
 )
 
 var upgrader = websocket.Upgrader{} // use default options
 
-const swVersion = 2
-
-// Indicies used for interpretting the output of speedtest-cli when using the
-// --csv output flag (not current used)
-const (
-	serverNum = iota
-	companyName
-	location
-	date
-	distance
-	ping
-	download
-	upload
-)
-
-// perf is can be used to store the CSV results from speedtest-cli (not
-// currently used)
-type perf struct {
-	serverNum   int
-	companyName string
-	location    string
-	date        string
-	distance    float64
-	ping        float64
-	download    float64
-	upload      float64
-}
-
-// A simple print method for the perf type
-func (pr perf) print() {
-	fmt.Println("---")
-	fmt.Println("ServerID:", pr.serverNum)
-	fmt.Println("ServerName:", pr.companyName)
-	fmt.Println("Location:", pr.location)
-	fmt.Println("Date:", pr.date)
-	fmt.Println("Distance:", pr.distance)
-	fmt.Println("PingLatency:", pr.ping)
-	fmt.Println("DownloadRate:", pr.download)
-	fmt.Println("UploadRate:", pr.upload)
-}
-
-// parseFields can be used to parse the CSV output of speedtest-cli (currently
-// unused)
-func parseFields(fields []string) (perf, error) {
-
-	var perfRec perf
-	var err error
-	perfRec.serverNum, err = strconv.Atoi(fields[serverNum])
-	if err != nil {
-		return perfRec, err
-	}
-	perfRec.companyName = fields[companyName]
-	perfRec.location = fields[location]
-	perfRec.date = fields[date]
-	perfRec.distance, err = strconv.ParseFloat(fields[distance], 64)
-	if err != nil {
-		return perfRec, err
-	}
-	perfRec.ping, err = strconv.ParseFloat(fields[ping], 64)
-	if err != nil {
-		return perfRec, err
-	}
-	perfRec.upload, err = strconv.ParseFloat(fields[upload], 64)
-	if err != nil {
-		return perfRec, err
-	}
-	perfRec.download, err = strconv.ParseFloat(fields[download], 64)
-	return perfRec, err
-}
-
-// PerfJSON is used to store the JSON data from the
-// speedtest-cli Python program
-type PerfJSON struct {
-	Server struct {
-		ID       string  `json:"id"`
-		Sponsor  string  `json:"sponsor"`
-		Location string  `json:"name"`
-		Country  string  `json:"country"`
-		Cc       string  `json:"cc"`
-		URL      string  `json:"url"`
-		Host     string  `json:"host"`
-		Lon      string  `json:"lon"`
-		Lat      string  `json:"lat"`
-		Distance float64 `json:"d"`
-		Latency  float64 `json:"latency"`
-		Share    string  `json:"share"`
-	} `json:"server"`
-	BytesSent     float64 `json:"bytes_sent"`
-	BytesReceived float64 `json:"bytes_received"`
-	Upload        float64 `json:"upload"`
-	Download      float64 `json:"download"`
-	Timestamp     string  `json:"timestamp"`
-	Ping          float64 `json:"ping"`
-}
-
-// A simple print method for the PerfJSON type
-func (pr PerfJSON) print() {
-	fmt.Println("---")
-	fmt.Println("ServerID:", pr.Server.ID)
-	fmt.Println("ServerName:", pr.Server.Sponsor)
-	fmt.Println("Location:", pr.Server.Location)
-	fmt.Println("Date:", pr.Timestamp)
-	fmt.Printf("Distance: %.2f km\n", pr.Server.Distance)
-	fmt.Printf("PingLatency: %.2f ms\n", pr.Ping)
-	fmt.Printf("DownloadRate: %.2f Mb/s\n", pr.Download/1e6)
-	fmt.Printf("UploadRate: %.2f Mb/s\n", pr.Upload/1e6)
-}
-
-// statusType is the string encoding for the type used for status messages
-const statusType = "status"
-
-// resultType is the string encoding for the type used for test results
-const resultType = "result"
-
-// initType is the string encoding for the type used to initialize a client
-const initType = "init"
-
-// Result is a structure that wraps a type with the the data to be sent to the
-// client. The Type can be a status message, a test results, or an
-// initialization message
-type Result struct {
-	Type string `json:"type"`
-	Data string `json:"data"`
-}
+const swVersion = 3
 
 // GetSpeedError is an error type for handling getSpeedTestInfo errors.
 type GetSpeedError struct {
@@ -159,7 +37,7 @@ func (gse GetSpeedError) Error() string {
 //
 // The return value is a PerfJSON structure used to parse the JSON results of
 // speedtest-cli and an error.
-func getSpeedTestInfo(server int) (PerfJSON, error) {
+func getSpeedTestInfo(server int) (messages.PerfJSON, error) {
 	var serverID string
 	if server > -1 {
 		serverID = strconv.Itoa(server)
@@ -168,7 +46,7 @@ func getSpeedTestInfo(server int) (PerfJSON, error) {
 	}
 	var cmd *exec.Cmd
 
-	var perf PerfJSON
+	var perf messages.PerfJSON
 	if serverID != "" {
 		cmd = exec.Command("speedtest-cli", "--json", "--server", serverID)
 	} else {
@@ -190,7 +68,7 @@ func getSpeedTestInfo(server int) (PerfJSON, error) {
 	if err = cmd.Wait(); err != nil {
 		return perf, err
 	}
-	perf.print()
+	perf.Print()
 	return perf, err
 }
 
@@ -200,7 +78,7 @@ func getSpeedTestInfo(server int) (PerfJSON, error) {
 // a single structure for this implementation.
 type HandlerContext struct {
 	mtx     sync.Mutex
-	perfs   []PerfJSON
+	perfs   []messages.PerfJSON
 	reqChan chan bool
 	wsMap   map[*websocket.Conn]bool
 }
@@ -245,7 +123,7 @@ func (ctx *HandlerContext) WsHandler(w http.ResponseWriter, r *http.Request) {
 		tmpData = []byte("[]")
 	}
 	// Wrap the initial state in a Result struct with type initType
-	err = c.WriteJSON(Result{Type: initType, Data: string(tmpData)})
+	err = c.WriteJSON(messages.Result{Type: messages.InitType, Data: string(tmpData)})
 	if err != nil {
 		log.Println("write:", err)
 		// If the connection has a problem, mark the WebSocket as inactive in
@@ -284,7 +162,7 @@ func sendWebSocketData(wsMap map[*websocket.Conn]bool, messageType string, data 
 			delete(wsMap, conn)
 			// Otherwise, let's try to use it
 		} else {
-			err := conn.WriteJSON(Result{Type: messageType, Data: data})
+			err := conn.WriteJSON(messages.Result{Type: messageType, Data: data})
 			if err != nil {
 				log.Println("write:", err)
 				conn.Close()
@@ -298,21 +176,21 @@ func sendWebSocketData(wsMap map[*websocket.Conn]bool, messageType string, data 
 // message to the clients, runs speedtest-clie via getSpeedTestInfo, adds the
 // results to the results slice (perfs), and then sends the incremental result
 // to the clients.  We are passing perfs by reference so we can add to the slice.
-func speedtestHandler(server int, req chan bool, wsMap map[*websocket.Conn]bool, perfs *[]PerfJSON) {
+func speedtestHandler(server int, req chan bool, wsMap map[*websocket.Conn]bool, perfs *[]messages.PerfJSON) {
 
-	var perf PerfJSON
+	var perf messages.PerfJSON
 	var err error
 	for {
 		// Wait for a request
 		<-req
 		// Send out a status message to all WebSockets
-		sendWebSocketData(wsMap, statusType, "Request made. Waiting for response.")
+		sendWebSocketData(wsMap, messages.StatusType, "Request made. Waiting for response.")
 		// Request speedTest data
 		perf, err = getSpeedTestInfo(server)
 		if err != nil {
 			log.Println("Error trying to get SpeedTest info.\n" + err.Error())
 			// Send out a status message to all WebSockets
-			sendWebSocketData(wsMap, statusType, "Error executing SpeedTest.")
+			sendWebSocketData(wsMap, messages.StatusType, "Error executing SpeedTest.")
 			continue
 		}
 		// Add to the perfs array for future reference
@@ -324,7 +202,7 @@ func speedtestHandler(server int, req chan bool, wsMap map[*websocket.Conn]bool,
 			continue
 		}
 		// Send out the result
-		sendWebSocketData(wsMap, resultType, string(tmpData))
+		sendWebSocketData(wsMap, messages.ResultType, string(tmpData))
 	}
 }
 
