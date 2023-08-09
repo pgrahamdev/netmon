@@ -48,9 +48,9 @@ func getSpeedTestInfo(server int) (messages.PerfJSON, error) {
 
 	var perf messages.PerfJSON
 	if serverID != "" {
-		cmd = exec.Command("speedtest-cli", "--json", "--server", serverID)
+		cmd = exec.Command("speedtest-cli", "--secure", "--json", "--server", serverID)
 	} else {
-		cmd = exec.Command("speedtest-cli", "--json")
+		cmd = exec.Command("speedtest-cli", "--secure", "--json")
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
